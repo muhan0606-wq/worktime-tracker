@@ -49,7 +49,7 @@ body { font-family: 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans KR', sans
 .week-total.met { color: #30D158; }
 
 /* Grid: 날짜 | 근무유형 | 실제근무시간 | 인정시간 */
-.row-grid { display: grid; grid-template-columns: 1fr 2.5fr 1fr 1fr; gap: 8px; }
+.row-grid { display: grid; grid-template-columns: 1fr 1.5fr 1.3fr 1fr; gap: 8px; }
 .col-hdrs { padding: 8px 20px; border-bottom: 1px solid #f0f0f2; }
 .col-h { font-size: 11px; color: #bbb; font-weight: 600; }
 .col-h.ch-date  { text-align: center; }
@@ -80,6 +80,12 @@ input.h-inp { width: 70px; padding: 6px 8px; border: 1.5px solid #e8e8ea; border
 input.h-inp:focus { outline: none; border-color: #007AFF; }
 input.h-inp:disabled { background: #f5f5f7; color: #ccc; border-color: #efefef; cursor: not-allowed; }
 .h-unit { font-size: 12px; color: #aaa; }
+.hours-col { display: flex; flex-direction: column; align-items: center; gap: 3px; width: 100%; }
+.nw-wrap { display: flex; align-items: center; gap: 3px; justify-content: center; }
+.nw-label { font-size: 10px; color: #bbb; white-space: nowrap; flex-shrink: 0; }
+input.nw-inp { width: 55px; padding: 3px 5px; font-size: 11px; color: #888; border-color: #f0f0f3; }
+input.nw-inp:focus { border-color: #007AFF; color: #333; }
+.cred-deduct { font-size: 10px; font-weight: 400; color: #FF9F0A; }
 
 .cred-cell { font-size: 13px; font-weight: 700; text-align: center; color: #333; line-height: 1.5; }
 .cred-cell.bonus { color: #007AFF; }
@@ -624,17 +630,31 @@ function onHoursChange(key, inp) {
   inp.value = dec > 0 ? fmtHours(dec) : '';
   upd(key, 'hours', inp.value);
 }
+function onNonWorkChange(key, inp) {
+  var dec = parseHoursStr(inp.value);
+  inp.value = dec > 0 ? fmtHours(dec) : '';
+  upd(key, 'nonWork', inp.value);
+}
 
 /* ── Calc ── */
 function calcEntry(entry) {
-  if (!entry) return { net:0, credited:0 };
+  if (!entry) return { net:0, credited:0, deduction:0 };
   var type = entry.type || 'normal';
-  if (type === 'vac')     return { net:0, credited:8 };
-  if (type === 'holiday') return { net:0, credited:0 };
+  if (type === 'vac')     return { net:0, credited:8, deduction:0 };
+  if (type === 'holiday') return { net:0, credited:0, deduction:0 };
   var h = parseHoursStr(entry.hours);
-  if (!h || h <= 0) return { net:0, credited:0 };
+  if (!h || h <= 0) return { net:0, credited:0, deduction:0 };
   var bonus = type==='half' ? 4 : type==='half2' ? 2 : 0;
-  return { net: h, credited: h + bonus };
+  /* 비업무시간 자동 차감: 1시간 미만 사용 시 1시간으로 올림 처리 */
+  var deduction = 0;
+  if (entry.nonWork) {
+    var nw = parseHoursStr(entry.nonWork);
+    if (nw > 0 && nw < 1) {
+      deduction = r1(1 - nw); /* 1시간과의 차이만큼 차감 */
+    }
+  }
+  var credited = r1(Math.max(0, h - deduction) + bonus);
+  return { net: h, credited: credited, deduction: deduction };
 }
 function r1(n) { return Math.round(n*10)/10; }
 
@@ -712,6 +732,8 @@ function renderWeekly(weeks, data) {
       var selCls = type==='vac'?'t-vac':type==='half'?'t-half':type==='half2'?'t-half2':type==='holiday'?'t-holiday':'';
       var credCls = isHol?'':type==='vac'?'vac-c':type!=='normal'?'bonus':'';
       var credSub = type==='vac'?'(휴가)':type==='half'?'(+4h)':type==='half2'?'(+2h)':'';
+      var showNw = !isHol && type !== 'vac';
+      var deductStr = (calc.deduction > 0) ? '<div class="cred-deduct">-'+fmtHours(calc.deduction)+'</div>' : '';
       var credDisp = type==='vac'?'8h': type==='holiday'?'-': calc.credited>0 ? r1(calc.credited)+'h' : '-';
       var dis = (isHol) ? 'disabled' : '';
 
@@ -720,13 +742,16 @@ function renderWeekly(weeks, data) {
         '<div class="day-date '+dateCls+'">'+dateStr+(hn&&isHol?'<span class="holiday-dot" data-name="'+hn+'" title="'+hn+'"></span>':'')+'</div>' +
         '<select class="type-sel '+selCls+'" onchange="upd(\''+key+'\',\'type\',this.value)">' +
           '<option value="normal"'  +(type==='normal'  ?' selected':'')+'>일반근무</option>' +
-          '<option value="half2"'   +(type==='half2'   ?' selected':'')+'>반반차 (+2h)</option>' +
-          '<option value="half"'    +(type==='half'    ?' selected':'')+'>반차 (+4h)</option>' +
-          '<option value="vac"'     +(type==='vac'     ?' selected':'')+'>휴가 (8h)</option>' +
-          '<option value="holiday"' +(type==='holiday' ?' selected':'')+'>공휴일 (0h)</option>' +
+          '<option value="half2"'   +(type==='half2'   ?' selected':'')+'>반반차</option>' +
+          '<option value="half"'    +(type==='half'    ?' selected':'')+'>반차</option>' +
+          '<option value="vac"'     +(type==='vac'     ?' selected':'')+'>휴가</option>' +
+          '<option value="holiday"' +(type==='holiday' ?' selected':'')+'>공휴일</option>' +
         '</select>' +
-        '<div class="hours-wrap"><input class="h-inp" type="text" inputmode="numeric" data-key="'+key+'" value="'+(e.hours ? fmtHours(parseHoursStr(e.hours)) : '')+'" '+dis+' onchange="onHoursChange(\''+key+'\',this)" onkeydown="onHoursKey(event,\''+key+'\',this)" placeholder="0:00"><span class="h-unit">h</span></div>' +
-        '<div class="cred-cell '+credCls+'">'+credDisp+(credSub?'<div class="cred-sub">'+credSub+'</div>':'')+'</div>';
+        '<div class="hours-col">' +
+          '<div class="hours-wrap"><input class="h-inp" type="text" inputmode="numeric" data-key="'+key+'" value="'+(e.hours ? fmtHours(parseHoursStr(e.hours)) : '')+'" '+dis+' onchange="onHoursChange(\''+key+'\',this)" onkeydown="onHoursKey(event,\''+key+'\',this)" placeholder="0:00"><span class="h-unit">h</span></div>' +
+          (showNw ? '<div class="nw-wrap"><span class="nw-label">비업무</span><input class="h-inp nw-inp" type="text" inputmode="numeric" value="'+(e.nonWork ? fmtHours(parseHoursStr(e.nonWork)) : '')+'" onchange="onNonWorkChange(\''+key+'\',this)" placeholder="-"></div>' : '') +
+        '</div>' +
+        '<div class="cred-cell '+credCls+'">'+credDisp+(credSub?'<div class="cred-sub">'+credSub+'</div>':'')+deductStr+'</div>';
       sec.appendChild(row);
     });
     wrap.appendChild(sec);
